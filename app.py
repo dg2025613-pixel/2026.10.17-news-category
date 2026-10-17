@@ -34,82 +34,96 @@ GENRES = ["정치", "경제", "사회", "문화", "스포츠", "IT/과학"]
 # =====================================
 st.markdown("""
 <style>
-/* 전체 배경 */
+
+/* 전체 배경: 밝은 블루 그레이 */
 .stApp {
-    background:
-        radial-gradient(ellipse at 50% 0%, #18365b 0%, transparent 55%),
-        linear-gradient(145deg, #07111f 0%, #0b1729 55%, #101c30 100%);
-    color: #f3f6fc;
+    background: linear-gradient(
+        135deg,
+        #edf4fc 0%,
+        #f7faff 55%,
+        #e3edf9 100%
+    );
+    color: #172b46;
 }
 
-/* 기본 콘텐츠 너비 */
+/* 메인 콘텐츠 */
 .block-container {
     max-width: 1150px;
     padding-top: 1.5rem;
     padding-bottom: 3rem;
 }
 
-/* 사이드바 숨기기 */
-[data-testid="stSidebar"] {
-    display: none;
-}
+/* 사이드바 숨김 */
+[data-testid="stSidebar"],
 [data-testid="collapsedControl"] {
     display: none;
 }
 
-/* 기본 텍스트 */
-.stApp, .stApp p, .stApp label {
-    color: #e4eaf5;
+/* 기본 글씨 */
+.stApp,
+.stApp p,
+.stApp label,
+.stMarkdown,
+.stCaption {
+    color: #243b57;
 }
+
 h1, h2, h3 {
-    color: #ffffff !important;
+    color: #102b4e !important;
     letter-spacing: -0.5px;
 }
 
-/* 뉴스 상단 바 */
+/* 상단 뉴스 바 */
 .news-topbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
-    border-bottom: 1px solid #31415a;
+    border-bottom: 2px solid #cfdaea;
     padding: 5px 0 17px 0;
     margin-bottom: 30px;
 }
+
 .brand {
-    color: #ffffff;
+    color: #15365c;
     font-size: 19px;
     font-weight: 900;
     letter-spacing: 2px;
 }
+
 .brand span {
-    color: #ff414d;
+    color: #e83242;
 }
+
 .live-tag {
-    color: #ff5b65;
+    color: #d92739;
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 900;
     letter-spacing: 1.5px;
 }
+
 .live-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #ff414d;
+    background: #ed3547;
     margin-right: 7px;
 }
 
-/* 메인 헤드라인 */
+/* 메인 헤드라인: 밝은 방송 스튜디오 */
 .hero {
     position: relative;
     overflow: hidden;
-    background: linear-gradient(115deg, #152c49, #0c192b 75%);
-    border: 1px solid #2b4262;
+    background: linear-gradient(115deg, #ffffff, #e5effc);
+    border: 1px solid #c8d9ee;
+    border-top: 5px solid #e83242;
     border-radius: 18px;
     padding: 32px 30px;
     margin-bottom: 25px;
+    box-shadow: 0 8px 25px rgba(33, 68, 110, 0.08);
 }
+
 .hero:after {
     content: "NEWS";
     position: absolute;
@@ -117,14 +131,15 @@ h1, h2, h3 {
     bottom: -35px;
     font-size: 100px;
     font-weight: 900;
-    color: rgba(255,255,255,0.035);
+    color: rgba(28, 73, 125, 0.06);
     letter-spacing: 5px;
     pointer-events: none;
 }
+
 .hero-label {
     display: inline-block;
     background: #e83242;
-    color: white;
+    color: #ffffff;
     padding: 6px 10px;
     border-radius: 4px;
     font-size: 11px;
@@ -132,134 +147,145 @@ h1, h2, h3 {
     letter-spacing: 1.5px;
     margin-bottom: 15px;
 }
+
 .hero-title {
     font-size: clamp(29px, 4vw, 45px);
-    line-height: 1.25;
+    line-height: 1.35;
     font-weight: 900;
-    color: #ffffff;
+    color: #102b4e;
     margin-bottom: 12px;
 }
+
 .hero-desc {
-    color: #b7c7dc;
+    color: #405774;
     font-size: 15px;
-    line-height: 1.8;
+    line-height: 1.9;
 }
 
-/* 섹션 구분 */
+/* 섹션 제목 */
 .section-title {
     font-size: 19px;
-    font-weight: 800;
-    color: white;
-    border-left: 4px solid #ff414d;
+    font-weight: 900;
+    color: #16365d;
+    border-left: 5px solid #e83242;
     padding-left: 12px;
     margin: 28px 0 15px 0;
 }
 
 /* 카드 */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    background: rgba(15, 29, 48, 0.88);
-    border-color: #2b3e59 !important;
+    background: #ffffff;
+    border-color: #cfdaea !important;
     border-radius: 14px;
+    box-shadow: 0 4px 15px rgba(31, 62, 100, 0.045);
 }
 
 /* 입력창 */
-.stTextInput input, .stTextArea textarea {
-    background: #0a1423 !important;
-    color: #ffffff !important;
-    border: 1px solid #40536e !important;
+.stTextInput input,
+.stTextArea textarea {
+    background: #ffffff !important;
+    color: #172b46 !important;
+    border: 1px solid #b9cbe1 !important;
     border-radius: 9px !important;
 }
-.stTextInput input:focus, .stTextArea textarea:focus {
-    border-color: #ff414d !important;
-    box-shadow: 0 0 0 1px #ff414d !important;
+
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder {
+    color: #71839b !important;
+    opacity: 1 !important;
+}
+
+.stTextInput input:focus,
+.stTextArea textarea:focus {
+    border-color: #3178c6 !important;
+    box-shadow: 0 0 0 1px #3178c6 !important;
 }
 
 /* 버튼 */
 .stButton > button {
     width: 100%;
-    background: linear-gradient(90deg, #e83242, #ff4b55);
-    color: white !important;
-    font-weight: 800;
+    background: linear-gradient(90deg, #d92739, #f04452);
+    color: #ffffff !important;
+    font-weight: 900;
     border: none;
     border-radius: 9px;
     min-height: 45px;
-    transition: 0.2s;
 }
+
 .stButton > button:hover {
-    background: linear-gradient(90deg, #ff4b55, #ff6570);
+    background: #b91f30;
     border: none;
-    transform: translateY(-1px);
 }
 
-/* 라디오 버튼 */
-.stRadio [role="radiogroup"] {
-    gap: 15px;
-}
-.stRadio label {
-    color: #e4eaf5 !important;
+/* 라디오 버튼과 설명 */
+.stRadio label,
+.stCheckbox label {
+    color: #243b57 !important;
 }
 
-/* 지표 */
+[data-testid="stCaptionContainer"] p,
+.stCaption {
+    color: #526781 !important;
+}
+
+/* 학습 데이터 지표 */
 [data-testid="stMetric"] {
-    background: #14263e;
-    border: 1px solid #304968;
+    background: #ffffff;
+    border: 1px solid #cfdaea;
     padding: 18px;
     border-radius: 12px;
 }
+
 [data-testid="stMetricLabel"] {
-    color: #aebed3 !important;
+    color: #526781 !important;
 }
+
 [data-testid="stMetricValue"] {
-    color: #ff5b65 !important;
+    color: #153d6b !important;
     font-weight: 900;
 }
 
 /* 표 */
 [data-testid="stDataFrame"] {
-    border: 1px solid #30415b;
+    border: 1px solid #cfdaea;
     border-radius: 10px;
     overflow: hidden;
+}
+
+/* 분석 결과 패널 */
+.result-panel {
+    background: linear-gradient(110deg, #ffffff, #e7f0fc);
+    border: 1px solid #b9cde6;
+    border-left: 6px solid #e83242;
+    border-radius: 14px;
+    padding: 25px;
+    margin-top: 18px;
 }
 
 /* 하단 */
 .footer {
     margin-top: 42px;
-    border-top: 1px solid #293b54;
+    border-top: 1px solid #cfdaea;
     padding-top: 18px;
     text-align: center;
-    color: #8193ad;
+    color: #60748d;
     font-size: 12px;
     line-height: 1.8;
 }
 
-/* 작은 화면 */
 @media (max-width: 600px) {
     .hero {
         padding: 23px 18px;
     }
+
     .hero:after {
         font-size: 65px;
     }
+
     .news-topbar {
         flex-wrap: wrap;
     }
 }
-</style>
-
-<div class="news-topbar">
-    <div class="brand">NEWS<span>AI</span> / INTELLIGENCE</div>
-    <div class="live-tag"><span class="live-dot"></span>AI NEWS ANALYSIS</div>
-</div>
-
-<div class="hero">
-    <div class="hero-label">NEWSROOM · AI ANALYTICS</div>
-    <div class="hero-title">뉴스의 흐름을 읽다.<br>데이터로 장르를 분석하다.</div>
-    <div class="hero-desc">
-        뉴스 원문을 입력하면 AI가 텍스트의 특징을 분석합니다.<br>
-        TF-IDF와 KNN 알고리즘으로 뉴스 장르를 분류합니다.
-    </div>
-</div>
-""", unsafe_allow_html=True)
 
 
 # =====================================
