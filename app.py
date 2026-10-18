@@ -1,7 +1,7 @@
 
-import ipaddress
-import socket
-from urllib.parse import urlparse, urljoin
+import html
+import re
+from urllib.parse import urlparse
 
 import pandas as pd
 import requests
@@ -10,715 +10,725 @@ import trafilatura
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.pipeline import Pipeline
+from sklearn.metrics.pairwise import cosine_similarity
 
 
-# =====================================
-# 1. 기본 설정
-# =====================================
+# =========================================================
+# 1. 페이지 기본 설정
+# =========================================================
+
 st.set_page_config(
-    page_title="NEWS AI | 뉴스 장르 분석",
+    page_title="AI 뉴스 장르 분류 시스템",
     page_icon="📰",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
-# KNN 이웃 수는 3으로 고정
-K_NEIGHBORS = 3
+
+# =========================================================
+# 2. 밝은 뉴스 스튜디오 디자인
+# =========================================================
+
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(
+            135deg,
+            #f4f8ff 0%,
+            #eaf2fc 55%,
+            #f9fbff 100%
+        );
+        color: #172b4d;
+    }
+
+    .block-container {
+        max-width: 1150px;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+    h1, h2, h3 {
+        color: #17365d !important;
+    }
+
+    p, label, li, .stMarkdown {
+        color: #263b57;
+    }
+
+    .news-header {
+        background: linear-gradient(110deg, #ffffff, #e4efff);
+        border: 1px solid #c9d9ef;
+        border-radius: 18px;
+        padding: 28px;
+        margin-bottom: 24px;
+        box-shadow: 0 5px 18px rgba(40, 75, 120, 0.08);
+    }
+
+    .news-label {
+        color: #d92739;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 2px;
+    }
+
+    .news-title {
+        color: #17365d;
+        font-size: 34px;
+        font-weight: 900;
+        margin-top: 8px;
+    }
+
+    .news-subtitle {
+        color: #526781;
+        font-size: 15px;
+        margin-top: 10px;
+    }
+
+    .result-card {
+        background: linear-gradient(110deg, #ffffff, #e7f0fc);
+        border: 1px solid #b9cde6;
+        border-left: 6px solid #e83242;
+        border-radius: 14px;
+        padding: 25px;
+        margin-top: 18px;
+        box-shadow: 0 4px 14px rgba(40, 75, 120, 0.07);
+    }
+
+    .result-label {
+        color: #d92739;
+        font-weight: 900;
+        letter-spacing: 1px;
+        font-size: 13px;
+    }
+
+    .result-category {
+        color: #15365d;
+        font-size: 36px;
+        font-weight: 900;
+        margin: 10px 0;
+    }
+
+    .result-caption {
+        color: #526781;
+        font-size: 13px;
+    }
+
+    .info-card {
+        background: #ffffff;
+        border: 1px solid #d4e0ef;
+        border-radius: 12px;
+        padding: 18px;
+        margin: 10px 0;
+    }
+
+    div[data-testid="stTextArea"] textarea,
+    div[data-testid="stTextInput"] input {
+        background-color: #ffffff;
+        color: #172b4d;
+        border: 1px solid #c7d5e7;
+        border-radius: 8px;
+    }
+
+    div[data-testid="stFileUploader"] {
+        background: #ffffff;
+        border: 1px dashed #b9cde6;
+        border-radius: 10px;
+        padding: 12px;
+    }
+
+    div.stButton > button {
+        background: #173e70;
+        color: white;
+        border: none;
+        border-radius: 9px;
+        font-weight: 700;
+        min-height: 45px;
+        width: 100%;
+    }
+
+    div.stButton > button:hover {
+        background: #245792;
+        color: white;
+        border: none;
+    }
+
+    div[data-testid="stMetric"] {
+        background: #ffffff;
+        border: 1px solid #d4e0ef;
+        border-radius: 10px;
+        padding: 14px;
+    }
+
+    hr {
+        border-color: #d4e0ef;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# 3. 뉴스 장르 및 기본 학습 데이터
+# =========================================================
 
 GENRES = ["정치", "경제", "사회", "문화", "스포츠", "IT/과학"]
 
-
-# =====================================
-# 2. 뉴스 스튜디오 디자인
-# =====================================
-st.markdown("""
-<style>
-
-/* 전체 배경: 밝은 블루 그레이 */
-.stApp {
-    background: linear-gradient(
-        135deg,
-        #edf4fc 0%,
-        #f7faff 55%,
-        #e3edf9 100%
-    );
-    color: #172b46;
-}
-
-/* 메인 콘텐츠 */
-.block-container {
-    max-width: 1150px;
-    padding-top: 1.5rem;
-    padding-bottom: 3rem;
-}
-
-/* 사이드바 숨김 */
-[data-testid="stSidebar"],
-[data-testid="collapsedControl"] {
-    display: none;
-}
-
-/* 기본 글씨 */
-.stApp,
-.stApp p,
-.stApp label,
-.stMarkdown,
-.stCaption {
-    color: #243b57;
-}
-
-h1, h2, h3 {
-    color: #102b4e !important;
-    letter-spacing: -0.5px;
-}
-
-/* 상단 뉴스 바 */
-.news-topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    border-bottom: 2px solid #cfdaea;
-    padding: 5px 0 17px 0;
-    margin-bottom: 30px;
-}
-
-.brand {
-    color: #15365c;
-    font-size: 19px;
-    font-weight: 900;
-    letter-spacing: 2px;
-}
-
-.brand span {
-    color: #e83242;
-}
-
-.live-tag {
-    color: #d92739;
-    font-size: 12px;
-    font-weight: 900;
-    letter-spacing: 1.5px;
-}
-
-.live-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #ed3547;
-    margin-right: 7px;
-}
-
-/* 메인 헤드라인: 밝은 방송 스튜디오 */
-.hero {
-    position: relative;
-    overflow: hidden;
-    background: linear-gradient(115deg, #ffffff, #e5effc);
-    border: 1px solid #c8d9ee;
-    border-top: 5px solid #e83242;
-    border-radius: 18px;
-    padding: 32px 30px;
-    margin-bottom: 25px;
-    box-shadow: 0 8px 25px rgba(33, 68, 110, 0.08);
-}
-
-.hero:after {
-    content: "NEWS";
-    position: absolute;
-    right: -10px;
-    bottom: -35px;
-    font-size: 100px;
-    font-weight: 900;
-    color: rgba(28, 73, 125, 0.06);
-    letter-spacing: 5px;
-    pointer-events: none;
-}
-
-.hero-label {
-    display: inline-block;
-    background: #e83242;
-    color: #ffffff;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: 1.5px;
-    margin-bottom: 15px;
-}
-
-.hero-title {
-    font-size: clamp(29px, 4vw, 45px);
-    line-height: 1.35;
-    font-weight: 900;
-    color: #102b4e;
-    margin-bottom: 12px;
-}
-
-.hero-desc {
-    color: #405774;
-    font-size: 15px;
-    line-height: 1.9;
-}
-
-/* 섹션 제목 */
-.section-title {
-    font-size: 19px;
-    font-weight: 900;
-    color: #16365d;
-    border-left: 5px solid #e83242;
-    padding-left: 12px;
-    margin: 28px 0 15px 0;
-}
-
-/* 카드 */
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    background: #ffffff;
-    border-color: #cfdaea !important;
-    border-radius: 14px;
-    box-shadow: 0 4px 15px rgba(31, 62, 100, 0.045);
-}
-
-/* 입력창 */
-.stTextInput input,
-.stTextArea textarea {
-    background: #ffffff !important;
-    color: #172b46 !important;
-    border: 1px solid #b9cbe1 !important;
-    border-radius: 9px !important;
-}
-
-.stTextInput input::placeholder,
-.stTextArea textarea::placeholder {
-    color: #71839b !important;
-    opacity: 1 !important;
-}
-
-.stTextInput input:focus,
-.stTextArea textarea:focus {
-    border-color: #3178c6 !important;
-    box-shadow: 0 0 0 1px #3178c6 !important;
-}
-
-/* 버튼 */
-.stButton > button {
-    width: 100%;
-    background: linear-gradient(90deg, #d92739, #f04452);
-    color: #ffffff !important;
-    font-weight: 900;
-    border: none;
-    border-radius: 9px;
-    min-height: 45px;
-}
-
-.stButton > button:hover {
-    background: #b91f30;
-    border: none;
-}
-
-/* 라디오 버튼과 설명 */
-.stRadio label,
-.stCheckbox label {
-    color: #243b57 !important;
-}
-
-[data-testid="stCaptionContainer"] p,
-.stCaption {
-    color: #526781 !important;
-}
-
-/* 학습 데이터 지표 */
-[data-testid="stMetric"] {
-    background: #ffffff;
-    border: 1px solid #cfdaea;
-    padding: 18px;
-    border-radius: 12px;
-}
-
-[data-testid="stMetricLabel"] {
-    color: #526781 !important;
-}
-
-[data-testid="stMetricValue"] {
-    color: #153d6b !important;
-    font-weight: 900;
-}
-
-/* 표 */
-[data-testid="stDataFrame"] {
-    border: 1px solid #cfdaea;
-    border-radius: 10px;
-    overflow: hidden;
-}
-
-/* 분석 결과 패널 */
-.result-panel {
-    background: linear-gradient(110deg, #ffffff, #e7f0fc);
-    border: 1px solid #b9cde6;
-    border-left: 6px solid #e83242;
-    border-radius: 14px;
-    padding: 25px;
-    margin-top: 18px;
-}
-
-/* 하단 */
-.footer {
-    margin-top: 42px;
-    border-top: 1px solid #cfdaea;
-    padding-top: 18px;
-    text-align: center;
-    color: #60748d;
-    font-size: 12px;
-    line-height: 1.8;
-}
-
-@media (max-width: 600px) {
-    .hero {
-        padding: 23px 18px;
-    }
-
-    .hero:after {
-        font-size: 65px;
-    }
-
-    .news-topbar {
-        flex-wrap: wrap;
-    }
-}
-
-
-# =====================================
-# 3. 학습용 예시 데이터
-# 실제 프로젝트에서는 충분한 뉴스 데이터로 교체
-# =====================================
 SAMPLE_DATA = [
-    ("정치", "국회 예산안 심의", "국회에서 여야 의원들이 예산안과 주요 정책의 추진 방향을 논의했다."),
-    ("정치", "정부 정책 발표", "정부는 관계 부처 회의를 열고 새로운 정책의 세부 계획을 발표했다."),
-    ("정치", "지방 행정 정책 논의", "정당 관계자들은 지역 현안과 지방 행정 정책에 대한 의견을 교환했다."),
+    # 정치
+    ("정치", "국회 본회의 법안 처리", "국회가 본회의를 열고 주요 법안의 처리 방안을 논의했다. 여야 의원들은 법안의 주요 내용과 시행 시기를 놓고 의견을 나눴다."),
+    ("정치", "정부 정책 추진 계획 발표", "정부는 관계 부처 회의를 열고 올해 정책 추진 계획을 발표했다. 정책의 실행 일정과 예산 배분 방안도 함께 검토했다."),
+    ("정치", "지방자치단체 정책 협의", "지방자치단체장들이 지역 현안 해결을 위한 협의에 나섰다. 참석자들은 교통과 주거 문제에 대한 대응 방안을 논의했다."),
+    ("정치", "정당 정책 토론회 개최", "정당 관계자들이 정책 토론회에서 주요 공약과 입법 방향을 설명했다. 토론에서는 복지와 교육 정책이 주요 쟁점으로 다뤄졌다."),
+    ("정치", "국회 상임위원회 회의", "국회 상임위원회가 소관 부처의 업무 현황을 점검했다. 의원들은 정책 집행 과정과 관련 예산에 관해 질의했다."),
 
-    ("경제", "국내 물가 동향", "소비자물가와 생활필수품 가격의 변화가 가계 지출과 소비 심리에 영향을 미치고 있다."),
-    ("경제", "기업 실적과 주식시장", "기업들의 분기 실적 발표 이후 주식시장에서는 매출과 영업이익 전망에 관심이 모였다."),
-    ("경제", "금리와 가계 대출", "금리 변동과 은행의 대출 조건이 가계의 이자 부담과 금융시장에 영향을 주고 있다."),
+    # 경제
+    ("경제", "국내 물가 동향 발표", "통계 자료에 따르면 소비자물가의 변동 폭이 주요 경제 지표로 주목받고 있다. 시장에서는 식료품과 에너지 가격의 움직임을 살펴보고 있다."),
+    ("경제", "기업 실적과 매출 분석", "기업들이 분기 실적을 발표하면서 매출과 영업이익 변화에 관심이 모이고 있다. 업계에서는 수요와 원가 변화가 실적에 영향을 미쳤다고 분석했다."),
+    ("경제", "한국 증시 거래 동향", "국내 증시에서 주요 종목의 주가가 움직이며 투자자들의 관심을 끌었다. 시장에서는 금리와 기업 실적, 해외 증시 흐름을 주요 변수로 보고 있다."),
+    ("경제", "중소기업 지원 정책", "중소기업의 경영 부담을 줄이기 위한 지원 방안이 논의됐다. 관계 기관은 자금 조달과 판로 확대를 위한 정책을 검토하고 있다."),
+    ("경제", "금리와 가계 대출 변화", "금리 변동이 가계 대출과 소비 심리에 미치는 영향에 관심이 쏠리고 있다. 금융권에서는 대출 규모와 상환 부담의 변화를 살펴보고 있다."),
 
-    ("사회", "지역 교통 안전 대책", "지자체는 보행자 사고를 줄이기 위해 교통 시설을 점검하고 안전 대책을 마련했다."),
-    ("사회", "학교 교육 환경 개선", "교육 당국은 학교 시설과 학생들의 학습 환경을 개선하기 위한 지원 계획을 검토했다."),
-    ("사회", "지역 주민 복지", "지역 사회에서는 복지 서비스 확대와 주민 지원을 위한 사업이 진행되고 있다."),
+    # 사회
+    ("사회", "지역 교통 안전 대책", "지역 관계 기관이 교통사고 예방을 위한 안전 대책을 마련하고 있다. 보행자 통행이 많은 구역의 시설과 안내 체계를 점검할 예정이다."),
+    ("사회", "학교 주변 안전 점검", "관계 기관이 학교 주변 통학로의 안전 시설을 점검했다. 점검 과정에서 보행 환경과 교통안전 시설의 개선 필요성이 논의됐다."),
+    ("사회", "시민 자원봉사 활동", "지역 주민들이 환경 정화와 취약계층 지원을 위한 봉사활동에 참여했다. 참가자들은 지속적인 지역사회 참여의 중요성을 강조했다."),
+    ("사회", "대중교통 이용 환경 개선", "대중교통 이용자의 편의를 높이기 위한 시설 개선 방안이 검토되고 있다. 관계 기관은 혼잡 시간대와 이용자 의견을 조사하고 있다."),
+    ("사회", "지역 복지 서비스 확대", "지역사회 복지 서비스를 확대하기 위한 논의가 진행됐다. 관계자들은 돌봄 지원과 복지 정보 접근성을 높이는 방안을 살펴봤다."),
 
-    ("문화", "미술 전시회 개최", "새로운 미술 전시회가 열리면서 관람객들이 작품과 작가의 예술적 표현을 감상했다."),
-    ("문화", "지역 문화 축제", "지역 문화 축제에서는 전통 공연과 예술 프로그램이 열려 다양한 문화 콘텐츠를 소개했다."),
-    ("문화", "영화제 신작 공개", "영화제에서 감독들의 신작이 공개됐으며 관객과 평론가들이 작품의 연출을 평가했다."),
+    # 문화
+    ("문화", "지역 미술 전시회 개막", "지역 미술관에서 현대 미술 작품을 소개하는 전시회가 열렸다. 관람객들은 다양한 작품을 감상하며 작가의 표현 방식과 전시 주제를 살펴봤다."),
+    ("문화", "도서관 독서 문화 행사", "공공도서관이 독서 문화를 확산하기 위한 행사를 마련했다. 행사에는 작가와 독자가 참여해 책의 주제와 독서 경험을 나눴다."),
+    ("문화", "전통문화 체험 프로그램", "문화시설에서 전통 공예와 생활문화를 소개하는 체험 프로그램이 진행됐다. 참가자들은 전통문화의 특징과 제작 과정을 배웠다."),
+    ("문화", "영화제 상영작 공개", "영화제가 올해 상영작과 주요 프로그램을 공개했다. 주최 측은 다양한 장르의 작품을 통해 관객과 창작자가 만나는 자리를 마련할 계획이다."),
+    ("문화", "지역 음악 공연 개최", "지역 공연장에서 음악 공연이 열려 관객들의 관심을 모았다. 공연은 여러 음악 장르를 아우르며 지역 문화예술 활동을 소개했다."),
 
-    ("스포츠", "축구 경기 승리", "축구팀은 경기 후반 득점에 성공하며 상대 팀을 제치고 중요한 승리를 거뒀다."),
-    ("스포츠", "프로야구 선수 기록", "프로야구 선수는 경기에서 안타와 타점을 기록하며 팀의 공격을 이끌었다."),
-    ("스포츠", "국제 대회 결승 진출", "선수단은 준결승 경기에서 좋은 경기력을 보여 국제 대회 결승전에 진출했다."),
+    # 스포츠
+    ("스포츠", "프로축구 경기 결과", "프로축구 경기에서 양 팀이 치열한 공방을 펼쳤다. 선수들은 공격과 수비에서 집중력을 보였으며 경기 종료 후 감독들이 경기 내용을 평가했다."),
+    ("스포츠", "프로야구 선수 기록", "프로야구 경기에서 타자와 투수의 활약이 승부에 영향을 미쳤다. 구단은 선수들의 경기 기록과 다음 경기 준비 상황을 살펴보고 있다."),
+    ("스포츠", "국제 수영 대회 개최", "국제 수영 대회에서 여러 나라의 선수들이 종목별 경기에 참가했다. 선수들은 예선과 결승에서 기록을 겨루며 기량을 선보였다."),
+    ("스포츠", "농구 리그 경기 분석", "농구 리그 경기에서 빠른 공격 전개와 수비 전략이 주요 관전 요소로 꼽혔다. 양 팀 감독은 경기 후 선수들의 움직임과 전술을 분석했다."),
+    ("스포츠", "선수 훈련과 대회 준비", "선수들이 다가오는 대회를 앞두고 훈련 강도와 경기 전략을 조정하고 있다. 코칭스태프는 체력과 기술 훈련을 함께 진행하고 있다."),
 
-    ("IT/과학", "인공지능 기술 연구", "연구진은 인공지능 모델의 학습 성능을 개선하는 새로운 알고리즘을 발표했다."),
-    ("IT/과학", "우주 탐사 연구 성과", "과학자들은 우주 탐사 자료를 분석해 행성과 우주 환경에 관한 새로운 정보를 확인했다."),
-    ("IT/과학", "반도체 기술 개발", "연구팀은 반도체의 처리 속도와 에너지 효율을 개선하기 위한 새로운 기술을 연구했다."),
+    # IT/과학
+    ("IT/과학", "인공지능 기술 연구 동향", "연구진이 인공지능 모델의 학습 효율을 높이는 방법을 연구하고 있다. 이번 연구에서는 데이터 처리와 모델 성능 평가 방식이 주요하게 다뤄졌다."),
+    ("IT/과학", "반도체 기술 개발", "반도체 업계가 처리 속도와 에너지 효율을 개선하기 위한 기술 개발에 나서고 있다. 연구진은 소자 구조와 제조 공정의 개선 가능성을 검토했다."),
+    ("IT/과학", "우주 탐사 연구 진행", "과학자들이 우주 환경을 관측하기 위한 연구를 진행하고 있다. 관측 자료는 천체의 특성과 우주 환경을 이해하는 데 활용될 예정이다."),
+    ("IT/과학", "로봇 센서 기술 연구", "연구진이 로봇의 주변 환경 인식 능력을 높이기 위한 센서 기술을 개발하고 있다. 센서에서 수집한 정보는 장애물 인식과 이동 판단에 활용된다."),
+    ("IT/과학", "기후 변화 데이터 분석", "연구진이 장기간의 기상 자료를 분석해 기후 변화의 특징을 살펴보고 있다. 데이터 분석 결과는 환경 변화의 원인과 영향을 연구하는 데 활용된다."),
 ]
 
-SAMPLE_DF = pd.DataFrame(
-    SAMPLE_DATA,
-    columns=["genre", "title", "text"]
-)
 
+# =========================================================
+# 4. 뉴스 URL에서 본문 가져오기
+# =========================================================
 
-# =====================================
-# 4. 학습 데이터 불러오기
-# =====================================
-st.markdown(
-    '<div class="section-title">01 / 학습 데이터</div>',
-    unsafe_allow_html=True
-)
+def extract_news_from_url(url):
+    """뉴스 URL에서 제목과 본문을 추출한다."""
 
-with st.expander("학습용 뉴스 데이터 CSV 업로드", expanded=False):
-    st.write(
-        "CSV에 genre, title, text 열이 있어야 합니다. "
-        "실제 분류 성능을 높이려면 장르별 뉴스 데이터를 충분히 준비하세요."
-    )
-    uploaded_file = st.file_uploader(
-        "뉴스 데이터 파일",
-        type=["csv"],
-        key="news_csv"
-    )
+    url = url.strip()
 
-if uploaded_file is not None:
-    try:
-        train_df = pd.read_csv(uploaded_file)
-
-        if not {"genre", "title", "text"}.issubset(train_df.columns):
-            st.error("CSV에는 genre, title, text 열이 필요합니다.")
-            st.stop()
-
-        train_df = train_df[["genre", "title", "text"]].dropna().copy()
-
-    except Exception as e:
-        st.error(f"CSV 읽기 오류: {e}")
-        st.stop()
-else:
-    train_df = SAMPLE_DF.copy()
-    st.info(
-        "현재 테스트용 예시 데이터로 실행 중입니다. "
-        "실제 뉴스 분류를 위해서는 충분한 학습 데이터가 필요합니다."
-    )
-
-for col in ["genre", "title", "text"]:
-    train_df[col] = train_df[col].astype(str).str.strip()
-
-train_df["content"] = (
-    train_df["title"] + " " + train_df["text"]
-).str.strip()
-
-train_df = train_df[
-    train_df["genre"].isin(GENRES)
-    & (train_df["content"].str.len() > 0)
-].copy()
-
-if len(train_df) < K_NEIGHBORS:
-    st.error("K=3으로 분류하려면 유효한 학습 뉴스가 최소 3개 필요합니다.")
-    st.stop()
-
-if train_df["genre"].nunique() < 2:
-    st.error("학습 데이터에는 최소 2개 이상의 뉴스 장르가 필요합니다.")
-    st.stop()
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.metric("학습 뉴스 수", f"{len(train_df):,}개")
-
-with col2:
-    st.metric("분류 장르 수", f"{train_df['genre'].nunique()}개")
-
-
-# =====================================
-# 5. TF-IDF + KNN 학습
-# KNN 이웃 수는 항상 3
-# =====================================
-model = Pipeline([
-    (
-        "tfidf",
-        TfidfVectorizer(
-            analyzer="char",
-            ngram_range=(2, 5),
-            sublinear_tf=True,
-            max_features=50000
-        )
-    ),
-    (
-        "knn",
-        KNeighborsClassifier(
-            n_neighbors=K_NEIGHBORS,
-            weights="distance",
-            metric="cosine",
-            algorithm="brute"
-        )
-    )
-])
-
-try:
-    model.fit(train_df["content"], train_df["genre"])
-except Exception as e:
-    st.error(f"모델 학습 오류: {e}")
-    st.stop()
-
-
-# =====================================
-# 6. 뉴스 URL 검사
-# =====================================
-def validate_public_url(url):
     parsed = urlparse(url)
 
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("http 또는 https 주소를 입력하세요.")
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("올바른 뉴스 URL을 입력해 주세요. (http:// 또는 https://)")
 
-    if not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("올바른 뉴스 URL을 입력하세요.")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
 
-    try:
-        addresses = socket.getaddrinfo(parsed.hostname, None)
-    except socket.gaierror:
-        raise ValueError("사이트 주소를 확인할 수 없습니다.")
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=15,
+    )
+    response.raise_for_status()
+    response.encoding = response.apparent_encoding or response.encoding
 
-    for address in addresses:
-        ip = ipaddress.ip_address(address[4][0])
-        if not ip.is_global:
-            raise ValueError("공개 웹사이트 주소만 사용할 수 있습니다.")
+    downloaded = response.text
 
-    return url
+    extracted_text = trafilatura.extract(
+        downloaded,
+        include_comments=False,
+        include_tables=False,
+        favor_precision=True,
+    )
 
+    metadata = trafilatura.extract_metadata(downloaded)
+    title = metadata.title if metadata and metadata.title else "제목을 가져오지 못했습니다."
 
-def extract_article(url):
-    current_url = url
+    if not extracted_text or len(extracted_text.strip()) < 30:
+        raise ValueError(
+            "뉴스 본문을 자동으로 가져오지 못했습니다. "
+            "해당 언론사가 자동 수집을 차단했을 수 있으니 본문을 직접 입력해 주세요."
+        )
 
-    with requests.Session() as session:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (compatible; NewsGenreClassifier/1.0)"
-            )
-        }
-
-        for _ in range(5):
-            validate_public_url(current_url)
-
-            response = session.get(
-                current_url,
-                headers=headers,
-                timeout=15,
-                allow_redirects=False
-            )
-
-            if response.is_redirect:
-                location = response.headers.get("Location")
-
-                if not location:
-                    raise ValueError("이동할 주소를 확인할 수 없습니다.")
-
-                current_url = urljoin(current_url, location)
-                continue
-
-            response.raise_for_status()
-
-            content_type = response.headers.get("Content-Type", "")
-
-            if "text/html" not in content_type.lower():
-                raise ValueError("HTML 뉴스 페이지가 아닙니다.")
-
-            if len(response.content) > 5_000_000:
-                raise ValueError("페이지 크기가 너무 큽니다.")
-
-            html = response.content.decode(
-                response.encoding or "utf-8",
-                errors="replace"
-            )
-
-            text = trafilatura.extract(
-                html,
-                include_comments=False,
-                include_tables=False,
-                favor_precision=True
-            )
-
-            if not text or len(text.strip()) < 100:
-                raise ValueError(
-                    "기사 본문을 가져오지 못했습니다. "
-                    "사이트 접근 제한 여부를 확인하거나 본문을 직접 입력하세요."
-                )
-
-            return text.strip()
-
-        raise ValueError("페이지 이동 횟수가 너무 많습니다.")
+    return title, extracted_text.strip()
 
 
-# =====================================
-# 7. 뉴스 입력 화면
-# =====================================
+# =========================================================
+# 5. 학습 데이터 불러오기
+# =========================================================
+
+def normalize_training_data(df):
+    """업로드한 CSV의 열 이름을 표준 형식으로 정리한다."""
+
+    df = df.copy()
+
+    # 열 이름의 앞뒤 공백 제거
+    df.columns = [str(col).strip().lower() for col in df.columns]
+
+    # 자주 사용하는 열 이름을 표준 이름으로 변환
+    rename_map = {}
+
+    for col in df.columns:
+        if col in ["category", "label", "분류", "장르"]:
+            rename_map[col] = "genre"
+        elif col in ["content", "body", "본문", "내용", "article"]:
+            rename_map[col] = "text"
+        elif col in ["headline", "제목"]:
+            rename_map[col] = "title"
+
+    df = df.rename(columns=rename_map)
+
+    if "genre" not in df.columns:
+        raise ValueError(
+            "CSV에 genre 또는 category 열이 필요합니다."
+        )
+
+    if "text" not in df.columns:
+        raise ValueError(
+            "CSV에 text 또는 content 열이 필요합니다."
+        )
+
+    if "title" not in df.columns:
+        df["title"] = ""
+
+    df["genre"] = df["genre"].astype(str).str.strip()
+    df["title"] = df["title"].fillna("").astype(str).str.strip()
+    df["text"] = df["text"].fillna("").astype(str).str.strip()
+
+    # 제목도 분류에 활용할 수 있도록 본문과 결합
+    df["combined_text"] = (
+        df["title"] + " " + df["text"]
+    ).str.strip()
+
+    df = df[
+        (df["genre"] != "")
+        & (df["text"] != "")
+        & (df["combined_text"] != "")
+    ].copy()
+
+    if len(df) < 1:
+        raise ValueError("사용할 수 있는 학습 데이터가 없습니다.")
+
+    if df["genre"].nunique() < 2:
+        raise ValueError(
+            "학습 데이터에는 최소 2개 이상의 서로 다른 장르가 필요합니다."
+        )
+
+    return df.reset_index(drop=True)
+
+
+# =========================================================
+# 6. TF-IDF + KNN 모델 학습
+# =========================================================
+
+@st.cache_data(show_spinner=False)
+def prepare_sample_data():
+    df = pd.DataFrame(
+        SAMPLE_DATA,
+        columns=["genre", "title", "text"],
+    )
+    return normalize_training_data(df)
+
+
+def train_model(df):
+    """TF-IDF로 텍스트를 수치화하고 KNN 모델을 학습한다."""
+
+    vectorizer = TfidfVectorizer(
+        analyzer="char",
+        ngram_range=(2, 5),
+        sublinear_tf=True,
+        max_features=50000,
+    )
+
+    X = vectorizer.fit_transform(df["combined_text"])
+    y = df["genre"]
+
+    # 이웃 수는 3으로 고정하되 데이터가 3개 미만이면 조정
+    k = min(3, len(df))
+
+    model = KNeighborsClassifier(
+        n_neighbors=k,
+        weights="distance",
+        metric="cosine",
+        algorithm="brute",
+    )
+
+    model.fit(X, y)
+
+    return vectorizer, model, X, k
+
+
+# =========================================================
+# 7. 화면 상단
+# =========================================================
+
 st.markdown(
-    '<div class="section-title">02 / 뉴스 입력</div>',
-    unsafe_allow_html=True
+    """
+    <div class="news-header">
+        <div class="news-label">AI NEWS ANALYTICS</div>
+        <div class="news-title">📰 AI 뉴스 장르 분류 시스템</div>
+        <div class="news-subtitle">
+            TF-IDF와 KNN을 활용해 뉴스의 텍스트 특징을 분석하고
+            장르를 예측하는 인공지능 프로젝트
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
+
+left, middle, right = st.columns(3)
+
+with left:
+    st.metric("분류 장르", "6개")
+
+with middle:
+    st.metric("분석 방법", "TF-IDF")
+
+with right:
+    st.metric("KNN 이웃 수", "3개")
+
+
+# =========================================================
+# 8. 학습 데이터 업로드
+# =========================================================
+
+with st.expander("📂 학습 데이터 CSV 업로드 (선택 사항)", expanded=False):
+    st.write(
+        "직접 만든 뉴스 데이터가 있다면 CSV 파일을 업로드할 수 있어. "
+        "업로드하지 않으면 기본 예시 데이터로 분석해."
+    )
+
+    st.caption(
+        "필수 열: genre, text / 선택 열: title. "
+        "category, content 같은 열 이름도 지원해."
+    )
+
+    uploaded_file = st.file_uploader(
+        "뉴스 학습 데이터 CSV",
+        type=["csv"],
+        key="training_csv",
+    )
+
+    training_df = None
+
+    if uploaded_file is not None:
+        try:
+            uploaded_df = pd.read_csv(uploaded_file)
+            training_df = normalize_training_data(uploaded_df)
+
+            st.success(
+                f"학습 데이터 {len(training_df)}개를 불러왔어."
+            )
+
+            st.dataframe(
+                training_df[["genre", "title", "text"]].head(10),
+                use_container_width=True,
+            )
+
+        except Exception as e:
+            st.error(f"CSV 파일을 읽는 중 오류가 발생했어: {e}")
+
+
+# =========================================================
+# 9. 입력 방식 선택
+# =========================================================
+
+st.subheader("🔎 분석할 뉴스 입력")
 
 input_mode = st.radio(
     "뉴스 입력 방법",
     ["뉴스 URL 입력", "본문 직접 입력"],
-    horizontal=True
+    horizontal=True,
 )
 
-if "article_text" not in st.session_state:
-    st.session_state["article_text"] = ""
+news_title = ""
+news_text = ""
+news_url = ""
 
-if "article_url" not in st.session_state:
-    st.session_state["article_url"] = ""
-
-with st.container(border=True):
-    if input_mode == "뉴스 URL 입력":
-        st.write("🔗 **분석할 뉴스 원문 주소를 입력하세요.**")
-
-        url = st.text_input(
-            "뉴스 URL",
-            placeholder="https://뉴스사이트/기사주소",
-            label_visibility="collapsed"
-        )
-
-        if st.button("뉴스 본문 가져오기", type="primary"):
-            if not url.strip():
-                st.warning("뉴스 URL을 입력하세요.")
-            else:
-                try:
-                    with st.spinner("뉴스 본문을 분석할 준비를 하고 있습니다..."):
-                        text = extract_article(url.strip())
-
-                    st.session_state["article_text"] = text
-                    st.session_state["article_url"] = url.strip()
-                    st.success("뉴스 본문을 가져왔습니다.")
-
-                except Exception as e:
-                    st.error(f"본문 추출 실패: {e}")
-
-    else:
-        st.write("📝 **뉴스 제목과 본문을 붙여 넣으세요.**")
-
-        manual_text = st.text_area(
-            "뉴스 본문",
-            height=220,
-            placeholder="뉴스 제목과 본문을 입력하세요...",
-            label_visibility="collapsed"
-        )
-
-        if st.button("입력한 본문 사용하기", type="primary"):
-            if len(manual_text.strip()) < 30:
-                st.warning("분류할 수 있도록 기사 내용을 더 입력하세요.")
-            else:
-                st.session_state["article_text"] = manual_text.strip()
-                st.session_state["article_url"] = ""
-                st.success("입력한 기사를 사용할 준비가 되었습니다.")
-
-
-# =====================================
-# 8. 장르 분류 결과
-# =====================================
-article_text = st.session_state["article_text"]
-
-if article_text:
-    st.markdown(
-        '<div class="section-title">03 / 분석 결과</div>',
-        unsafe_allow_html=True
+if input_mode == "뉴스 URL 입력":
+    news_url = st.text_input(
+        "뉴스 기사 URL",
+        placeholder="https://example.com/news/article",
     )
 
-    with st.container(border=True):
-        st.write("**분석 대상 기사**")
+    st.caption(
+        "일부 언론사는 자동 본문 추출을 차단할 수 있어. "
+        "그런 경우에는 '본문 직접 입력'을 이용해 줘."
+    )
 
-        if st.session_state["article_url"]:
-            st.caption(st.session_state["article_url"])
+else:
+    news_title = st.text_input(
+        "뉴스 제목 (선택 사항)",
+        placeholder="뉴스 제목을 입력해 줘",
+    )
 
-        st.text_area(
-            "기사 내용 확인",
-            value=article_text,
-            height=160,
-            disabled=True,
-            label_visibility="collapsed",
-            key="preview_text"
-        )
+    news_text = st.text_area(
+        "뉴스 본문",
+        placeholder="분석할 뉴스 본문을 여기에 붙여 넣어 줘.",
+        height=240,
+    )
 
-        if st.button("AI 뉴스 장르 분석", type="primary"):
-            try:
-                predicted_genre = model.predict([article_text])[0]
 
-                probabilities = model.predict_proba([article_text])[0]
-                classes = model.named_steps["knn"].classes_
+# =========================================================
+# 10. 뉴스 분석 실행
+# =========================================================
 
-                results = pd.DataFrame({
-                    "장르": classes,
-                    "비율(%)": probabilities * 100
-                }).sort_values("비율(%)", ascending=False)
+analyze_button = st.button(
+    "🔍 뉴스 장르 분석하기",
+    use_container_width=True,
+)
 
-                st.session_state["prediction"] = predicted_genre
-                st.session_state["results"] = results
+if analyze_button:
 
-                vectorizer = model.named_steps["tfidf"]
-                knn = model.named_steps["knn"]
+    # URL에서 본문 추출
+    if input_mode == "뉴스 URL 입력":
 
-                query_vector = vectorizer.transform([article_text])
-                distances, indices = knn.kneighbors(query_vector)
+        if not news_url.strip():
+            st.warning("뉴스 URL을 입력해 줘.")
+            st.stop()
 
-                similar_rows = train_df.iloc[indices[0]].copy()
-                similar_rows["유사도(%)"] = (
-                    1 - distances[0]
-                ).clip(0, 1) * 100
+        try:
+            with st.spinner("뉴스 본문을 가져오는 중..."):
+                news_title, news_text = extract_news_from_url(news_url)
 
-                st.session_state["similar_rows"] = similar_rows[
-                    ["genre", "title", "유사도(%)"]
-                ].copy()
+            st.success("뉴스 본문을 가져왔어.")
 
-            except Exception as e:
-                st.error(f"분류 오류: {e}")
+        except Exception as e:
+            st.error(f"뉴스를 가져오지 못했어: {e}")
+            st.stop()
 
-    if "prediction" in st.session_state:
-        predicted_genre = st.session_state["prediction"]
-        results = st.session_state["results"]
-        similar_rows = st.session_state["similar_rows"]
+    # 직접 입력한 본문 확인
+    if not news_text.strip():
+        st.warning("분석할 뉴스 본문을 입력해 줘.")
+        st.stop()
+
+    if len(news_text.strip()) < 20:
+        st.warning("조금 더 긴 뉴스 본문을 입력해 줘. (20자 이상 권장)")
+        st.stop()
+
+    # 학습 데이터 선택
+    if uploaded_file is not None:
+        if training_df is None:
+            st.error("업로드한 CSV를 확인해 줘.")
+            st.stop()
+        data = training_df.copy()
+    else:
+        data = prepare_sample_data()
+
+    # 모델 학습 및 분석
+    try:
+        with st.spinner("TF-IDF와 KNN으로 뉴스를 분석하는 중..."):
+
+            vectorizer, model, X_train, k = train_model(data)
+
+            combined_news = (
+                str(news_title).strip() + " " + news_text.strip()
+            ).strip()
+
+            X_news = vectorizer.transform([combined_news])
+
+            predicted_genre = model.predict(X_news)[0]
+
+            # 가까운 학습 뉴스 찾기
+            similarities = cosine_similarity(X_news, X_train).flatten()
+
+            # 유사도가 높은 뉴스 순서로 정렬
+            similar_indices = similarities.argsort()[::-1]
+
+            # 유사도 0인 데이터는 제외
+            similar_indices = [
+                int(i)
+                for i in similar_indices
+                if similarities[i] > 0
+            ][:5]
+
+            # 모델 내부의 이웃 정보 확인
+            distances, neighbor_indices = model.kneighbors(
+                X_news,
+                n_neighbors=k,
+            )
+
+            neighbor_details = []
+
+            for idx, distance in zip(
+                neighbor_indices[0],
+                distances[0],
+            ):
+                neighbor_details.append(
+                    {
+                        "genre": data.iloc[int(idx)]["genre"],
+                        "title": data.iloc[int(idx)]["title"],
+                        "similarity": max(0.0, 1.0 - float(distance)),
+                    }
+                )
+
+        # 결과 카드
+        safe_genre = html.escape(str(predicted_genre))
 
         st.markdown(
             f"""
-            <div style="
-                background: linear-gradient(110deg, #172e4b, #101d30);
-                border: 1px solid #e83b49;
-                border-left: 6px solid #ff414d;
-                border-radius: 14px;
-                padding: 25px;
-                margin-top: 18px;
-            ">
-                <div style="
-                    color: #ff626b;
-                    font-size: 12px;
-                    font-weight: 900;
-                    letter-spacing: 2px;
-                    margin-bottom: 10px;
-                ">AI CLASSIFICATION REPORT</div>
-                <div style="
-                    color: #c4d1e3;
-                    font-size: 14px;
-                    margin-bottom: 8px;
-                ">분석된 뉴스 장르</div>
-                <div style="
-                    color: white;
-                    font-size: 36px;
-                    font-weight: 900;
-                ">{predicted_genre}</div>
-                <div style="
-                    color: #aabbd0;
-                    font-size: 13px;
-                    margin-top: 12px;
-                ">TF-IDF 텍스트 분석 · KNN 이웃 3개 기준</div>
+            <div class="result-card">
+                <div class="result-label">
+                    AI CLASSIFICATION REPORT
+                </div>
+                <div style="color: #526781; margin-top: 12px;">
+                    분석된 뉴스 장르
+                </div>
+                <div class="result-category">
+                    {safe_genre}
+                </div>
+                <div class="result-caption">
+                    TF-IDF 텍스트 분석 · KNN 이웃 {k}개 기준
+                </div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
-        st.markdown("#### 장르별 모델 점수")
+        st.markdown("### 📄 분석한 뉴스")
+
+        if news_title:
+            st.write(f"**제목:** {news_title}")
+
+        if input_mode == "뉴스 URL 입력":
+            st.write(f"**URL:** {news_url}")
+
+        with st.expander("분석에 사용된 본문 보기"):
+            st.write(news_text)
+
+        # 유사 뉴스 표시
+        st.markdown("### 🔗 가장 비슷한 학습 뉴스")
+
+        if similar_indices:
+            for rank, idx in enumerate(similar_indices, start=1):
+                row = data.iloc[idx]
+                similarity_percent = similarities[idx] * 100
+
+                safe_title = html.escape(
+                    str(row["title"]) or "제목 없음"
+                )
+                safe_row_genre = html.escape(str(row["genre"]))
+
+                st.markdown(
+                    f"""
+                    <div class="info-card">
+                        <div style="color:#d92739;font-weight:800;">
+                            유사 뉴스 {rank}
+                        </div>
+                        <div style="
+                            color:#17365d;
+                            font-size:18px;
+                            font-weight:800;
+                            margin:7px 0;
+                        ">
+                            {safe_title}
+                        </div>
+                        <div style="color:#526781;">
+                            장르: {safe_row_genre}
+                            &nbsp; | &nbsp;
+                            텍스트 유사도: {similarity_percent:.1f}%
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                with st.expander(f"유사 뉴스 {rank} 본문 보기"):
+                    st.write(row["text"])
+
+        else:
+            st.info(
+                "학습 데이터에서 유사한 텍스트를 찾지 못했어. "
+                "학습 데이터를 추가하면 비교 결과가 개선될 수 있어."
+            )
+
+        # KNN 이웃 결과
+        st.markdown("### 🧠 KNN 이웃 분석")
+
+        st.write(
+            "KNN은 입력 뉴스와 텍스트 특징이 가까운 학습 뉴스 "
+            "3개를 찾아 장르를 예측해. 아래는 실제로 선택된 이웃이야."
+        )
+
+        neighbor_df = pd.DataFrame(neighbor_details)
+
+        if not neighbor_df.empty:
+            neighbor_df["similarity"] = (
+                neighbor_df["similarity"] * 100
+            ).round(1)
+
+            neighbor_df = neighbor_df.rename(
+                columns={
+                    "genre": "뉴스 장르",
+                    "title": "학습 뉴스 제목",
+                    "similarity": "유사도(%)",
+                }
+            )
+
+            st.dataframe(
+                neighbor_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        # 학습 데이터 분포
+        st.markdown("### 📊 학습 데이터 장르 분포")
+
+        genre_counts = (
+            data["genre"]
+            .value_counts()
+            .rename_axis("장르")
+            .reset_index(name="뉴스 개수")
+        )
+
+        st.bar_chart(
+            genre_counts.set_index("장르")["뉴스 개수"]
+        )
 
         st.caption(
-            "아래 값은 KNN 이웃의 가중치를 바탕으로 계산한 비율이며, "
-            "검증된 정답 확률이나 모델 정확도를 의미하지 않습니다."
+            "주의: 분류 결과는 학습 데이터의 구성과 품질에 영향을 받아. "
+            "이 모델은 뉴스의 진위 여부를 판별하는 것이 아니라 "
+            "텍스트를 바탕으로 장르를 예측하는 모델이야."
         )
 
-        st.dataframe(
-            results.style.format({"비율(%)": "{:.1f}%"}),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        chart_data = results.set_index("장르")[["비율(%)"]]
-        st.bar_chart(chart_data)
-
-        st.markdown("#### 가장 비슷한 학습 뉴스 3개")
-
-        similar_rows = similar_rows.rename(columns={
-            "genre": "뉴스 장르",
-            "title": "학습 뉴스 제목"
-        })
-
-        similar_rows["유사도(%)"] = similar_rows["유사도(%)"].round(1)
-
-        st.dataframe(
-            similar_rows,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.caption(
-            "유사도는 TF-IDF 벡터의 코사인 유사도를 바탕으로 계산한 참고값입니다."
-        )
+    except Exception as e:
+        st.error(f"분석 중 오류가 발생했어: {e}")
+        st.exception(e)
 
 
-# =====================================
-# 9. 하단 안내
-# =====================================
-st.markdown("""
-<div class="footer">
-    NEWS AI · INTELLIGENCE DESK<br>
-    TF-IDF TEXT ANALYSIS &nbsp; | &nbsp; K-NEAREST NEIGHBORS<br>
-    이 서비스의 결과는 학습 데이터에 따라 달라질 수 있습니다.
-</div>
-""", unsafe_allow_html=True)
+# =========================================================
+# 11. 하단 설명
+# =========================================================
+
+st.divider()
+
+st.markdown(
+    """
+    **분류 원리**
+
+    1. **TF-IDF:** 뉴스에 등장하는 문자 조각의 중요도를 수치로 변환해.
+    2. **KNN:** 새 뉴스와 가까운 학습 뉴스 3개를 찾아.
+    3. **장르 예측:** 가까운 뉴스들의 장르를 바탕으로 결과를 예측해.
+
+    이 앱은 학습 데이터 기반의 간단한 텍스트 분류 모델이야.
+    결과는 참고용이며, 실제 뉴스 장르와 항상 일치하는 것은 아니야.
+    """
+)
