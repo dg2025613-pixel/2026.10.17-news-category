@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import requests
 import trafilatura
-import io
 import re
-from pathlib import Path
 
+from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import KNeighborsClassifier
 
@@ -22,9 +20,9 @@ st.set_page_config(
 )
 
 GITHUB_EXCEL_PATH = "data/news_data.xlsx"
-K_NEIGHBORS = 3
 
-GENRES = ["정치", "경제", "사회", "문화", "스포츠", "IT-과학"]
+# KNN 이웃 수 변경
+K_NEIGHBORS = 5
 
 
 # ==========================================
@@ -33,6 +31,7 @@ GENRES = ["정치", "경제", "사회", "문화", "스포츠", "IT-과학"]
 
 st.markdown("""
 <style>
+
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
 
 html, body, [class*="css"] {
@@ -107,7 +106,7 @@ h2, h3 {
 
 div[data-testid="stMetric"] {
     background-color: white;
-    padding: 15px;
+    padding: 18px;
     border-radius: 12px;
     border: 1px solid #e1eaf5;
 }
@@ -131,25 +130,43 @@ div[data-testid="stMetric"] {
 
 
 # ==========================================
-# 3. 제목 영역
+# 3. 제목
 # ==========================================
 
 st.markdown("""
 <div class="news-header">
+
     <h1>📰 AI NEWS CLASSIFICATION STUDIO</h1>
-    <p>TF-IDF와 KNN 알고리즘을 활용한 인공지능 뉴스 장르 분류 시스템</p>
-    <p>뉴스 기사를 입력하면 AI가 내용을 분석하여 장르를 예측합니다.</p>
+
+    <p>
+    TF-IDF와 KNN 알고리즘을 활용한 인공지능 뉴스 장르 분류 시스템
+    </p>
+
+    <p>
+    뉴스 기사를 입력하면 AI가 내용을 분석하여 장르를 예측합니다.
+    </p>
+
 </div>
 """, unsafe_allow_html=True)
 
 
 # ==========================================
-# 4. 데이터 열 이름 정리
+# 4. 엑셀 데이터 불러오기
 # ==========================================
 
-def normalize_columns(df):
+def load_github_data():
 
-    df = df.copy()
+    file_path = Path(GITHUB_EXCEL_PATH)
+
+    if not file_path.exists():
+        raise FileNotFoundError(
+            f"{GITHUB_EXCEL_PATH} 파일을 찾을 수 없습니다."
+        )
+
+    df = pd.read_excel(
+        file_path,
+        engine="openpyxl"
+    )
 
     df.columns = [
         str(col).strip().lower()
@@ -179,14 +196,18 @@ def normalize_columns(df):
     for col in required_columns:
         if col not in df.columns:
             raise ValueError(
-                f"필수 열 '{col}'이 없습니다. "
-                f"현재 열 이름: {list(df.columns)}"
+                f"필수 열 {col}이 없습니다."
             )
 
     df = df[required_columns].copy()
 
     for col in required_columns:
-        df[col] = df[col].fillna("").astype(str).str.strip()
+        df[col] = (
+            df[col]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
 
     df = df[
         (df["genre"] != "") &
@@ -198,85 +219,32 @@ def normalize_columns(df):
 
 
 # ==========================================
-# 5. GitHub 엑셀 데이터 불러오기
-# ==========================================
-
-@st.cache_data
-def load_github_data():
-
-    file_path = Path(GITHUB_EXCEL_PATH)
-
-    if not file_path.exists():
-        raise FileNotFoundError(
-            f"{GITHUB_EXCEL_PATH} 파일을 찾을 수 없습니다."
-        )
-
-    df = pd.read_excel(
-        file_path,
-        engine="openpyxl"
-    )
-
-    return normalize_columns(df)
-
-
-# ==========================================
-# 6. 사용자가 업로드한 데이터 불러오기
-# ==========================================
-
-def load_uploaded_data(uploaded_file):
-
-    file_bytes = uploaded_file.getvalue()
-
-    if uploaded_file.name.lower().endswith(".xlsx"):
-        df = pd.read_excel(
-            io.BytesIO(file_bytes),
-            engine="openpyxl"
-        )
-
-    elif uploaded_file.name.lower().endswith(".csv"):
-        df = pd.read_csv(
-            io.BytesIO(file_bytes),
-            encoding="utf-8-sig"
-        )
-
-    else:
-        raise ValueError("CSV 또는 XLSX 파일만 사용할 수 있습니다.")
-
-    return normalize_columns(df)
-
-
-# ==========================================
-# 7. 데이터 정리
+# 5. 학습 데이터 정리
 # ==========================================
 
 def clean_training_data(df):
 
     df = df.copy()
 
-    # 제목의 공백 정리
     df["title_key"] = (
         df["title"]
         .str.replace(r"\s+", " ", regex=True)
         .str.strip()
     )
 
-    # 하나의 제목이 여러 장르에 등록되어 있는지 확인
-    genre_counts = df.groupby("title_key")["genre"].nunique()
+    genre_counts = (
+        df.groupby("title_key")["genre"]
+        .nunique()
+    )
 
     conflicting_titles = genre_counts[
         genre_counts > 1
     ].index.tolist()
 
-    # 서로 다른 장르로 중복 분류된 제목 제외
-    conflict_rows = len(
-        df[df["title_key"].isin(conflicting_titles)]
-    )
-
     df = df[
         ~df["title_key"].isin(conflicting_titles)
     ].copy()
 
-    # 동일한 제목의 중복 데이터 제거
     df = df.drop_duplicates(
         subset=["title_key"],
         keep="first"
@@ -284,126 +252,62 @@ def clean_training_data(df):
 
     df = df.drop(columns=["title_key"])
 
-    return df, len(conflicting_titles), conflict_rows
+    return df
 
 
 # ==========================================
-# 8. 데이터 선택
+# 6. 학습 데이터 불러오기 및 정리
 # ==========================================
-
-st.sidebar.title("⚙️ 데이터 설정")
-
-st.sidebar.write(
-    "기본적으로 GitHub의 엑셀 파일을 학습 데이터로 사용합니다."
-)
-
-uploaded_file = st.sidebar.file_uploader(
-    "학습 데이터 직접 업로드",
-    type=["xlsx", "csv"]
-)
-
-if st.sidebar.button("🔄 GitHub 데이터 새로고침"):
-
-    st.cache_data.clear()
-    st.rerun()
-
 
 try:
 
-    if uploaded_file is not None:
+    original_df = load_github_data()
 
-        original_df = load_uploaded_data(uploaded_file)
-
-        data_source = "사용자가 업로드한 파일"
-
-    else:
-
-        original_df = load_github_data()
-
-        data_source = "GitHub 엑셀 파일"
+    df = clean_training_data(original_df)
 
 except Exception as e:
 
-    st.error(f"학습 데이터를 불러오지 못했습니다: {e}")
-
-    st.info(
-        "GitHub 저장소에 data/news_data.xlsx 파일이 있는지 확인해 주세요."
+    st.error(
+        f"학습 데이터를 불러오지 못했습니다: {e}"
     )
 
     st.stop()
 
 
-# ==========================================
-# 9. 학습 데이터 정리
-# ==========================================
-
-df, conflict_title_count, conflict_row_count = clean_training_data(
-    original_df
-)
-
 if len(df) < K_NEIGHBORS:
-    st.error("학습 데이터가 너무 적습니다.")
+
+    st.error("학습 데이터가 부족합니다.")
+
     st.stop()
 
 
 # ==========================================
-# 10. 학습 데이터 현황
+# 7. 학습 데이터 현황
 # ==========================================
 
 st.subheader("📊 학습 데이터 현황")
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 with col1:
+
     st.metric(
-        "원본 데이터",
+        "원본 데이터 수",
         f"{len(original_df)}개"
     )
 
 with col2:
+
     st.metric(
-        "실제 학습 데이터",
-        f"{len(df)}개"
-    )
-
-with col3:
-    st.metric(
-        "중복 장르 충돌 제목",
-        f"{conflict_title_count}개"
-    )
-
-st.caption(f"현재 데이터 출처: {data_source}")
-
-if conflict_title_count > 0:
-
-    st.warning(
-        f"서로 다른 장르로 분류된 제목 {conflict_title_count}개 "
-        f"(총 {conflict_row_count}개 행)를 학습에서 제외했습니다."
+        "사용 중인 학습 파일",
+        "news_data.xlsx"
     )
 
 
 # ==========================================
-# 11. 장르별 데이터 분포
+# 8. TF-IDF 벡터화
 # ==========================================
 
-st.markdown("### 장르별 학습 데이터 분포")
-
-genre_counts = df["genre"].value_counts()
-
-st.bar_chart(
-    genre_counts
-)
-
-st.caption(
-    "막대가 높을수록 해당 장르의 학습 데이터가 많다는 의미입니다."
-)
-
-
-# ==========================================
-# 12. TF-IDF 벡터화
-# ==========================================
-
-# 제목과 키워드를 하나의 문서로 결합
 X = (
     df["title"] + " " + df["text"]
 ).tolist()
@@ -422,7 +326,7 @@ X_tfidf = vectorizer.fit_transform(X)
 
 
 # ==========================================
-# 13. KNN 모델 학습
+# 9. KNN 모델 학습
 # ==========================================
 
 model = KNeighborsClassifier(
@@ -438,13 +342,8 @@ model.fit(
 )
 
 
-st.success(
-    f"학습 완료! 현재 {len(df)}개의 뉴스 데이터로 KNN 모델을 학습했습니다."
-)
-
-
 # ==========================================
-# 14. 뉴스 기사 URL 추출
+# 10. URL에서 뉴스 추출
 # ==========================================
 
 def extract_article(url):
@@ -452,7 +351,9 @@ def extract_article(url):
     url = url.strip()
 
     if not url.startswith(("http://", "https://")):
-        raise ValueError("올바른 뉴스 URL을 입력해 주세요.")
+        raise ValueError(
+            "올바른 뉴스 URL을 입력해 주세요."
+        )
 
     downloaded = trafilatura.fetch_url(url)
 
@@ -481,13 +382,15 @@ def extract_article(url):
     )
 
     if not article_text:
+
         raise ValueError(
             "기사 본문을 추출하지 못했습니다. "
-            "해당 언론사가 자동 수집을 차단했을 수 있습니다. "
             "기사 본문을 직접 입력해 주세요."
         )
 
-    metadata = trafilatura.extract_metadata(downloaded)
+    metadata = trafilatura.extract_metadata(
+        downloaded
+    )
 
     article_title = ""
 
@@ -498,7 +401,7 @@ def extract_article(url):
 
 
 # ==========================================
-# 15. 뉴스 입력 화면
+# 11. 뉴스 입력 화면
 # ==========================================
 
 st.markdown("---")
@@ -511,8 +414,10 @@ input_method = st.radio(
     horizontal=True
 )
 
+
 article_title = ""
 article_text = ""
+
 
 with st.form("news_form"):
 
@@ -543,7 +448,7 @@ with st.form("news_form"):
 
 
 # ==========================================
-# 16. 뉴스 분석 및 예측
+# 12. 뉴스 분석
 # ==========================================
 
 if predict_button:
@@ -553,10 +458,16 @@ if predict_button:
         if input_method == "뉴스 URL 입력":
 
             if not article_url.strip():
-                st.error("뉴스 URL을 입력해 주세요.")
+
+                st.error(
+                    "뉴스 URL을 입력해 주세요."
+                )
+
                 st.stop()
 
-            with st.spinner("뉴스 기사를 가져오는 중입니다..."):
+            with st.spinner(
+                "뉴스 기사를 가져오는 중입니다..."
+            ):
 
                 article_title, article_text = extract_article(
                     article_url
@@ -564,35 +475,34 @@ if predict_button:
 
         if not article_text.strip():
 
-            st.error("뉴스 본문을 입력해 주세요.")
+            st.error(
+                "뉴스 본문을 입력해 주세요."
+            )
 
             st.stop()
 
-        # 제목과 본문 결합
         prediction_input = (
             article_title + " " + article_text
         ).strip()
 
-        # TF-IDF 변환
         input_vector = vectorizer.transform(
             [prediction_input]
         )
 
-        # 장르 예측
         prediction = model.predict(
             input_vector
         )[0]
 
-        # 가장 유사한 학습 데이터 3개 찾기
         distances, indices = model.kneighbors(
             input_vector,
-            n_neighbors=min(K_NEIGHBORS, len(df))
+            n_neighbors=K_NEIGHBORS
         )
 
         similarities = 1 - distances[0]
 
+
         # ==================================
-        # 17. 예측 결과 출력
+        # 13. 예측 결과
         # ==================================
 
         st.markdown("---")
@@ -601,20 +511,30 @@ if predict_button:
 
         st.markdown(f"""
         <div class="result-card">
-            <div class="result-label">AI가 예측한 뉴스 장르</div>
-            <div class="result-value">{prediction}</div>
+
+            <div class="result-label">
+            AI가 예측한 뉴스 장르
+            </div>
+
+            <div class="result-value">
+            {prediction}
+            </div>
+
         </div>
         """, unsafe_allow_html=True)
+
 
         st.write("")
 
         st.info(
-            "이 결과는 TF-IDF로 뉴스의 특징을 수치화한 뒤 "
-            "KNN 알고리즘으로 가장 가까운 학습 데이터를 비교해 예측한 것입니다."
+            "TF-IDF로 뉴스의 특징을 수치화한 뒤 "
+            "KNN 알고리즘으로 가장 가까운 학습 데이터 "
+            "5개를 비교하여 장르를 예측했습니다."
         )
 
+
         # ==================================
-        # 18. 유사한 뉴스 데이터
+        # 14. 유사한 뉴스 표시
         # ==================================
 
         st.subheader("📚 가장 유사한 학습 뉴스")
@@ -627,11 +547,17 @@ if predict_button:
         ):
 
             neighbor_rows.append({
+
                 "순위": rank,
+
                 "예측 장르": df.iloc[idx]["genre"],
+
                 "뉴스 제목": df.iloc[idx]["title"],
+
                 "유사도": f"{similarity * 100:.2f}%"
+
             })
+
 
         neighbor_df = pd.DataFrame(
             neighbor_rows
@@ -643,44 +569,57 @@ if predict_button:
             hide_index=True
         )
 
+
         # ==================================
-        # 19. 분석에 사용된 뉴스 표시
+        # 15. 뉴스 본문 확인
         # ==================================
 
-        with st.expander("분석에 사용된 뉴스 본문 확인"):
+        with st.expander(
+            "분석에 사용된 뉴스 본문 확인"
+        ):
 
             if article_title:
-                st.markdown(f"**제목:** {article_title}")
+
+                st.markdown(
+                    f"**제목:** {article_title}"
+                )
 
             st.write(article_text)
 
 
     except Exception as e:
 
-        st.error(f"뉴스 분석 중 오류가 발생했습니다: {e}")
+        st.error(
+            f"뉴스 분석 중 오류가 발생했습니다: {e}"
+        )
 
 
 # ==========================================
-# 20. 하단 안내
+# 16. 하단 안내
 # ==========================================
 
 st.markdown("---")
 
 st.markdown("""
 <div class="info-card">
+
     <h3>🤖 AI 뉴스 분류 시스템 안내</h3>
+
     <p>
     본 시스템은 TF-IDF와 KNN 알고리즘을 이용하여
     뉴스의 장르를 예측합니다.
     </p>
+
     <p>
     TF-IDF는 단어 및 문자 조합의 중요도를 수치화하며,
     KNN은 입력된 뉴스와 유사한 학습 데이터를 찾아
     가장 적절한 장르를 예측합니다.
     </p>
+
     <p class="small-text">
-    본 시스템의 예측 결과는 학습 데이터의 품질과
+    예측 결과는 학습 데이터의 품질과
     뉴스 내용에 따라 달라질 수 있습니다.
     </p>
+
 </div>
 """, unsafe_allow_html=True)
